@@ -1,0 +1,81 @@
+.node {
+	fill: black;
+	opacity:0.1;	
+}		
+.node.fixed {
+	fill: red;
+}
+.node.modified {
+	fill: red;
+}
+.node.fixed.modified{
+	opacity: 0.3;
+}
+.link {	
+	stroke: black;
+	stroke-linecap:round;
+	pointer-events: none;
+}
+
+rect {
+	pointer-events: all;
+}
+#control-panel{
+	width: 900px;
+	position: absolute;
+	background: #FFFFFF;
+	opacity:0.8;
+	padding:5px;
+}
+#control-panel-hotspot{
+	
+}
+.slider{
+	display:inline-block;
+	width: 300px;
+	margin: 0px 15px 0px 15px;
+}
+div.tooltip .slider{
+	width: 250px;
+	horizontal-align:center;
+	vertical-align:center;
+}
+.slider-label{
+	font-size:200%;
+	display:inline-block;
+}
+.slider-value{
+	font-size:200%;
+	display:inline-block;
+}
+div.tooltip {
+	opacity:0.8;
+	transition: opacity 0.3s;
+	text-shadow:1px 1px 0px gray;
+	background: #FFFFFF;
+	border:solid gray 1px;
+	position: absolute;
+	text-align:center;
+	width:300px;
+	height:200px;
+}
+.tooltip-node-title{
+	
+}
+#saveLoadPanel{
+	position: absolute;
+	width: 640px;
+	height: 480px;
+	background: white;
+	border:solid orange 1px;
+	padding: 5px;
+	opacity:0.8;
+}
+#saveLoadPanel textarea{
+	display:block;
+	width: 100%;
+	height: 400px;
+	margin-bottom: 5px;
+	box-sizing: border-box;  
+	resize: none;
+}

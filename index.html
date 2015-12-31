@@ -1,0 +1,548 @@
+<!DOCTYPE html>
+<meta http-equiv="content-type" content="text/html; charset=UTF8">
+<html>
+  <head>
+    <title>Force-Directed Layout</title>
+	<link rel="stylesheet" href="jquery-ui-1.11.4/jquery-ui.css">
+	<link rel="stylesheet" href="index.css">
+	<script src="jquery-2.1.4.js"></script>
+	<script src="jquery-ui-1.11.4/jquery-ui.js"></script>
+    <script type="text/javascript" src="d3.js"></script>	
+	<script type="text/javascript" src="dataHolder.js"></script>
+  </head>
+  
+  <body>
+
+	<div id="nodePopup" class="absolute tooltip">
+		<div class="tooltip-node-title"></div>
+		<div id="nodeCharge" class="slider"></div>
+		<div id="nodeChildCharge" class="slider"></div>
+		<button id="restoreNodeDefaults">Reset</button>
+	</div>
+
+	<input type="checkbox" class="checkbox" id="toggleCP"><label for="toggleCP">Control Panel</label>
+  	<input type="checkbox" class="checkbox" id="hideNodes"><label for="hideNodes">hide nodes</label>
+  	<input type="checkbox" class="checkbox" id="saveLoad"><label for="saveLoad">Save/Load</label>
+
+	<div>
+		<div id="control-panel">
+		<div class="slider-label">depth:</div>
+			<div id="maxDepth" class="slider" ></div>
+			<div class="slider-value"></div>
+			<br/>
+			<div class="slider-label">link distance:</div>
+			<div id="linkdist" class="slider" ></div>
+			<div class="slider-value"></div>
+			<br/>
+			<div class="slider-label">link strength:</div>
+			<div id="linkStrength" class="slider" ></div>
+			<div class="slider-value"></div>
+			<br/>
+			<div class="slider-label">charge:</div>
+			<div id="charge" class="slider" ></div>
+			<div class="slider-value"></div>
+			<br/>
+			<div class="slider-label">charge distance:</div>
+			<div id="chargeDistance" class="slider" ></div>
+			<div class="slider-value"></div>
+			<br/>
+			<div class="slider-label">gravity:</div>
+			<div id="gravity" class="slider" ></div>
+			<div class="slider-value"></div>
+			<br/>
+			<div class="slider-label">link width base:</div>
+			<div id="linkWidthBase" class="slider" ></div>
+			<div class="slider-value"></div>
+			<br/>
+			<div class="slider-label">link width factor:</div>
+			<div id="linkWidthFactor" class="slider" ></div>
+			<div class="slider-value"></div>
+			<br/>
+			<div class="slider-label">visible depth:</div>
+			<div id="visibleDepth" class="slider" ></div>
+			<div class="slider-value"></div>
+		</div>
+		<div id="chart"><div id="saveLoadPanel">
+			<textarea></textarea>
+			<button id="load">Load</button>
+		</div>
+	</div>
+	</div>
+	
+	<div id="framecount"></div>
+	
+    <script type="text/javascript">
+		var json = dataHolder.json;
+
+		var width = 1600,
+			height = 850,
+			r = 15,
+			fill = d3.scale.category20();
+			
+		$(function() {
+			setupGui();
+			
+			d3.select("#nodePopup")
+				.style("opacity", "0.0")
+				.style("pointer-events", "none");
+
+			var force = d3.layout.force()
+				.size([width, height])
+				.nodes([])
+				.linkStrength(2)
+				.on("tick", tick);
+			
+			var controlMode = false;
+			$('html').bind('keydown', function(e) {
+				if(e.ctrlKey && !e.key) controlMode = true;
+			});
+			$('html').bind('keyup', function(e) {
+				if(!e.ctrlKey && !e.key) controlMode = false;
+			});
+			
+			var startedAtControlMode;
+			var drag = (function(){
+				return force.drag()
+					.on("dragstart",  function (d, e) {
+						if(controlMode){
+							startedAtControlMode = true;
+							d3.event.sourceEvent.stopPropagation();
+							return;
+						}
+						startedAtControlMode = false;
+						d.dragged = false;
+						d3.event.sourceEvent.stopPropagation();
+						d3.select(this).classed("fixed", true);
+					}).on("drag", function (d, i) {
+						var e = d3.event;
+						if(e.dx || e.dy) d.dragged = true;
+					}).on("dragend", function (d) {
+						if(startedAtControlMode){
+							d3.event.sourceEvent.stopPropagation();
+							return;
+						}
+						if(!d.dragged) {
+							d.fixed = !d.fixed;
+							d3.select(this).classed("fixed", d.fixed);
+							if(!d.fixed){
+								// d.px = d.x;
+								// d.py = d.y;
+							}
+							force.resume();
+						} else {
+							d.fixed = true;
+						}
+					});
+			})();
+
+			var svg = (function(){
+				var outer = d3.select("#chart")
+					.append("svg:svg")
+					.attr("width", width)
+					.attr("height", height)
+					.attr("pointer-events", "all");
+
+				var outerSvg = outer.append('svg:g')
+					.call(d3.behavior.zoom().on("zoom", 
+						function () {
+							trans=d3.event.translate;
+							scale=d3.event.scale;
+
+							svg.attr("transform",
+								"translate(" + trans + ")"
+							  + " scale(" + scale + ")");
+					})).on("dblclick.zoom", null);
+
+				outerSvg.append("rect")
+						.classed("bg", true)
+						.attr("width", "100%")
+						.attr("height", "100%")
+						.attr("fill", "#DDDDFF");
+								
+				return outerSvg.append('svg:g')
+			})();
+			
+			var nodes = force.nodes(),
+				links = force.links(),
+				node = svg.selectAll(".node"),
+				link = svg.selectAll(".link");
+
+			var ready = true;
+			var allNodesMap = d3.map();
+			restart();
+
+			d3.timer(function() { 
+				force.resume();
+
+			})
+
+			var popupNode;
+			
+			function nodeMouseDown (node) {
+				if(!d3.event.ctrlKey) return;
+
+				d3.event.stopImmediatePropagation();
+
+				popupNode = node;
+				updateNodeSliders();
+				
+				var matrix = this.getScreenCTM()
+					.translate(+this.getAttribute("cx"),+this.getAttribute("cy"));
+					
+				var popup = d3.select("#nodePopup");
+				var w = popup[0][0].offsetWidth;
+				var h = popup[0][0].offsetHeight;
+				var left = (window.pageXOffset + matrix.e - w/2);
+				var top = (window.pageYOffset + matrix.f-h/2);
+				popup
+					.style("opacity", "0.8")
+					.style("left", left + "px")
+					.style("top", top + "px")
+					.style("pointer-events", "all")
+					;
+					
+				$(".tooltip-node-title").text(node.name);
+					
+				popup.on("mouseleave", function(){
+					if(d3.event.ctrlKey) return;
+					d3.select("#nodePopup")
+						.style("opacity", "0.0")
+						.style("pointer-events", "none");
+				});
+			}
+
+/*************************************************************************************************************************
+	restart
+*************************************************************************************************************************/
+			function restart(hard) {
+				if(!ready) return;
+				
+				force.linkDistance(function(n){return sliderValue("linkdist")});
+				force.charge(function (n){ 
+					var v = -sliderValue("charge");
+					var m = n["chargeMod"] || 0;
+					var p = n.parent ? (allNodesMap.get(n.parent)["childChargeMod"] || 0) : 0;
+					return v * Math.pow(2, m) * Math.pow(2, p);
+				});
+				force.chargeDistance(sliderValue("chargeDistance"));
+				
+				// force.chargeDistance(150);
+				// force.gravity(function(){return sliderValue("gravity")});
+				force.gravity(sliderValue("gravity"));
+				force.linkStrength(function (n){ return sliderValue("linkStrength")});
+				
+				// force.friction(1);
+				link = link.data(links);
+				
+				link.enter().insert("line")
+					.attr("class", "link");
+
+				link.transition()
+					    .duration(300)
+						.attr("opacity", function(l){return l.source.depth <= sliderValue("visibleDepth") ? 1 : 0;});
+					
+				if(hard)
+					link.exit().remove();
+				else 
+					link.exit().transition()
+					    .duration(100)
+						.attr("stroke-width", 0)
+					    .remove();
+					
+				link.attr("stroke-width", function(l){
+						return sliderValue("linkWidthBase") + 
+							sliderValue("linkWidthFactor") * Math.pow(2, -l.target.depth);
+						// (+l.target.depth+1)
+					});
+
+				node = node.data(nodes);
+
+				var nodeEnter = node.enter().insert("circle", ".cursor");
+				nodeEnter
+					.attr("class", "node")
+					.attr("fill", "black")
+					.attr("r", 0)
+					.classed("fixed", function(n){return n.fixed})
+					.on("mousedown", nodeMouseDown)
+					.call(drag);
+				if(hard)
+					nodeEnter.attr("r", r);
+				else
+					nodeEnter
+						.transition()
+			      		.duration(500)
+			      		.ease("elastic", 3, 0.4)
+			      		.attr("r", r);
+
+      			if(hard) node.exit().remove();
+				else node.exit().transition()
+			    		.duration(300)
+						.attr("r", 0)
+			    		.remove();
+
+				node.classed("modified", function(n){
+						return n.chargeMod || n.childChargeMod;
+					})
+
+				force.start();
+			}
+
+			function addRemoveDot(nodeMap){
+				var desiredDepth = sliderValue("maxDepth");
+				var currentDepth = nodes.length > 0 ? nodes[nodes.length-1].depth : 0;
+				var nextDepth = json.nodes.length > 0 ? json.nodes[0].depth : currentDepth+1;
+				
+				if(nextDepth <= desiredDepth){
+					return addNode(nodeMap);
+				} else if(desiredDepth < currentDepth){
+					return removeNode();
+				}
+				
+				return false;
+			}
+			
+			function addNode(nodeMap){
+				if(json.nodes.length == 0) return false;
+				
+				var node = json.nodes.splice(0, 1)[0];
+				nodes.push(node)-1;
+				allNodesMap.set(node.id, node);
+				
+				var parent = nodes.filter(function(n){return n.id == node.parent})[0];
+				if(parent) {
+					var grandParent = allNodesMap.get(parent.parent);
+					if(grandParent){
+						var dx = grandParent.x - parent.x;
+						var dy = grandParent.y - parent.y;
+						var angle = Math.atan2(dy, dx) + Math.PI + randomRange(0.25)*Math.PI;
+						node.x = parent.x + Math.cos(angle)*10;
+						node.y = parent.y + Math.sin(angle)*10;
+					} else {
+						node.x = parent.x+1-Math.random()*2;
+						node.y = parent.y - Math.random()*5;						
+					}
+					links.push({"source":node, "target":parent});
+				} else {
+					node.x = width/2;
+					node.y = height/2;					
+				}
+				
+				var savedNode = nodeMap && nodeMap[node.id];
+				if(savedNode){
+					node.x = savedNode.x;
+					node.y = savedNode.y;
+					node.px = savedNode.px;
+					node.py = savedNode.py;
+					node.chargeMod = savedNode.chargeMod;
+					node.childChargeMod = savedNode.childChargeMod;
+					node.fixed = savedNode.fixed;
+				}
+				
+				return true;
+			}
+			
+			function removeNode(){
+				if(nodes.length == 0) return false;
+				var node = nodes.pop();
+				// id, name, depth, numChildren, parent
+				json.nodes.unshift({"id":node.id, "name":node.name, "depth":node.depth, "numChildren":node.numChildren, "parent": node.parent});
+				
+				for(var i=0; i<links.length; i++){
+					var l = links[i];
+					if(l.source.id == node.id){
+						links.splice(i, 1);
+						i--;
+					}
+				}
+				
+				allNodesMap.set(node.id, null);
+				return true;
+			}
+
+			function tick(e) {
+				// Push sources up and targets down to form a weak tree.
+				var k = 6 * e.alpha;
+				links.forEach(function(d, i) {
+				  // d.source.y -= k;
+				  // d.target.y += k;
+				});
+				
+				node.attr("cx", function(d) { return d.x; })
+					.attr("cy", function(d) { return d.y; });
+
+				link.attr("x1", function(d) { return d.source.x; })
+					.attr("y1", function(d) { return d.source.y; })
+					.attr("x2", function(d) { return d.target.x; })
+					.attr("y2", function(d) { return d.target.y; });
+			}
+
+			var framecount=0;
+			setInterval(function(){ 
+				framecount++;
+				var added = false;
+				for(var i=0; i<1; i++)
+					if(addRemoveDot()) added = true;
+				if(added)
+					restart();
+				$("#framecount").text("* " + framecount + ", "+ (added ? "adding" : "done"));
+			}, 20);
+			
+			var sliderMap;
+			var sliderValueMap;
+			function setupGui(){
+				sliderValueMap = {};
+				var map = d3.map([
+					{id:"maxDepth", min:0, value:4, max:7, step:1, slide: sliderChanged},
+					{id:"linkdist", min:0, value:30, max:100, slide: sliderChanged},
+					{id:"linkStrength", min:0, value:2, max:10, step:0.1, slide: sliderChanged},
+					{id:"charge", min:0, value:220, max:1000, step:10, slide: sliderChanged},
+					{id:"chargeDistance", min:100, value:1000, max:1000, step:10, slide: sliderChanged},
+					{id:"gravity", min:0, value:0.3, max:5, step:0.1, slide: sliderChanged},
+					{id:"linkWidthBase", min:0, value:0, max:10, step:1, slide: sliderChanged},
+					{id:"linkWidthFactor", min:0, value:20, max:50, step:1, slide: sliderChanged},
+					{id:"visibleDepth", min:0, value:7, max:7, step:1, slide: sliderChanged},
+					{id:"nodeCharge", min:-10, value:0, max:10, step:0.1, slide: nodeSliderChanged, prop:"chargeMod"},
+					{id:"nodeChildCharge", min:-10, value:0, max:10, step:0.1, slide: nodeSliderChanged, prop:"childChargeMod"},
+					
+					
+				]);
+				$(".slider").slider({ 
+					// slide: sliderChanged,
+					// change: restart
+				});
+				map.forEach(function(i, item){
+					sliderValueMap[item.id] = item.value;
+					$("#"+item.id).slider(item);
+					$("#"+item.id).next("div.slider-value").text(item.value);
+					if(item.prop) $("#"+item.id).slider().attr("prop", item.prop);
+				});
+
+				function sliderChanged(event, ui){
+					sliderValueMap[event.target.id] = ui.value;
+					
+					$(ui).each(function(index, value){
+						// var v = $(value).slider("value");
+						$(value.handle).parent().next().text(ui.value);
+					})
+					
+					restart();
+				}
+			
+				function nodeSliderChanged(event, ui){
+					var propName = $(event.target).attr("prop");
+					popupNode[propName] = ui.value;
+					restart();
+				}
+
+				$("#control-panel").hide(0);
+				$("#saveLoadPanel").hide(0);
+
+				$("#toggleCP").button()
+				.click(function(){
+						$("#control-panel").toggle(300);
+					});
+
+				$("#hideNodes").button().click(function(event){
+					var hide = this.checked;
+					$(".node").attr("visibility", hide ? "hidden" : "visible");
+					$(".bg").attr("fill", hide ? "white" : "#DDDDFF");
+				});
+				$("#saveLoad").button().click(function(event){
+					$("#saveLoadPanel").toggle(300);
+
+					$("#saveLoadPanel #stop").button();
+					$("#saveLoadPanel #add").button();
+					$("#saveLoadPanel #start").button();
+
+					var objs=[];
+					for(var n in nodes){
+						var node = nodes[n];
+						var obj = {
+							id:node.id, 
+							x:node.x,
+						 	y:node.y,
+							fixed:node.fixed || false, 
+							chargeMod:node.chargeMod || 0,
+							childChargeMod:node.childChargeMod || 0,
+							px:node.px,
+							py:node.py};
+						objs.push(obj);
+					}
+
+					var data = {
+						maxDepth: sliderValue("maxDepth"),
+						linkdist: sliderValue("linkdist"),
+						linkStrength: sliderValue("linkStrength"),
+						charge: sliderValue("charge"),
+						chargeDistance: sliderValue("chargeDistance"),
+						gravity: sliderValue("gravity"),
+						linkWidthBase: sliderValue("linkWidthBase"),
+						linkWidthFactor: sliderValue("linkWidthFactor"),
+						nodes: objs
+					}
+
+					$("#saveLoadPanel textarea")
+						.val(JSON.stringify(data));
+				});
+
+				$("#saveLoadPanel #load").button().click(function(event){
+					var text = $("#saveLoadPanel textarea").val();
+					var j = JSON.parse(text);
+					if(nodes.length != 0) {
+						//alert("clear all nodes, bitch");
+						//return;
+					}
+					sliderValue("maxDepth", j.maxDepth);
+					sliderValue("linkdist", j.linkdist);
+					sliderValue("linkStrength", j.linkStrength);
+					sliderValue("charge", j.charge);
+					sliderValue("chargeDistance", j.chargeDistance);
+					sliderValue("gravity", j.gravity);
+					sliderValue("linkWidthBase", j.linkWidthBase);
+					sliderValue("linkWidthFactor", j.linkWidthFactor);
+
+					var nodeMap = [];
+
+					for(var i=0; i<j.nodes.length; i++){
+						var n = j.nodes[i];
+						nodeMap[n.id] = n;
+					}
+
+					while(removeNode());
+					restart(true);
+					while(addRemoveDot(nodeMap));
+					restart(true);
+				});
+
+				$("#restoreNodeDefaults").button().click(function(event, ui){
+					$(".slider[prop]").each(function(index, slider){
+						popupNode[$(slider).attr("prop")] = 0;
+					});
+					updateNodeSliders();
+					restart();
+				});
+			}
+			
+			function updateNodeSliders() {
+				if(!popupNode) return;
+				$(".slider[prop]").each(function(index, slider){
+					var value = popupNode[$(slider).attr("prop")];
+					if(value) $(slider).slider("value", value);
+					else $(slider).slider("value", 0);
+				})
+			}
+			
+			function sliderValue(slider, value) {
+				if(value === undefined) return sliderValueMap[slider];
+				sliderValueMap[slider] = value;
+				$("#"+slider).slider('value',value);
+				$("#"+slider).next().text(value);
+			}
+
+			function randomRange(range){
+				return (Math.random()-0.5)*range*2;
+			}
+		});
+    </script>
+  </body>
+</html>
